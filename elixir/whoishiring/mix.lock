@@ -1,0 +1,3 @@
+%{
+  "jsx": {:git, "https://github.com/talentdeficit/jsx.git", "45ffea21a6863c58fb7da1f937e868916ff68b27", [tag: "master"]},
+}
