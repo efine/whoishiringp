@@ -1,4 +1,4 @@
--module(whoshiringp).
+-module(whoishiringp).
 
 -export([main/0]).
 -export([main/1]).
@@ -17,7 +17,7 @@ main(MaxConcurrency) ->
     inets:start(),
     ssl:start(),
     User = get_user(?URL_BASE, ?USER_ID),
-    case proplists:get_value(<<"submitted">>, User) of
+    case maps:get(<<"submitted">>, User) of
         undefined ->
             io:format("No submissions for user ~p\n", [User]);
         Submissions ->
@@ -26,7 +26,7 @@ main(MaxConcurrency) ->
 
 get_user(UrlBase, UserId) ->
     User = get_url_json(UrlBase, "user", UserId),
-    Id = proplists:get_value(<<"id">>, User),
+    Id = maps:get(<<"id">>, User),
     case Id =:= UserId of
         false ->
             io:format("Expected user id ~p, got ~p, aborting\n", [UserId, Id]),
@@ -37,9 +37,9 @@ get_user(UrlBase, UserId) ->
 
 print_jobs(UrlBase, Submissions, MaxConcurrency) ->
     case get_first_matching_submission(UrlBase, Submissions) of
-        {ok, Props} ->
-            Title = proplists:get_value(<<"title">>, Props, <<"">>),
-            Kids = proplists:get_value(<<"kids">>, Props, []),
+        {ok, Map} ->
+            Title = maps:get(<<"title">>, Map, <<"">>),
+            Kids = maps:get(<<"kids">>, Map, []),
             io:format("~s\n", [Title]),
             Jobs = pget_jobs(UrlBase, Kids, MaxConcurrency),
             print_jobs(Jobs);
@@ -60,8 +60,8 @@ get_first_matching_submission(_UrlBase, []) ->
     undefined.
 
 is_matching_submission(Submission) ->
-    Title = proplists:get_value(<<"title">>, Submission, <<"">>),
-    Type = proplists:get_value(<<"type">>, Submission, <<"">>),
+    Title = maps:get(<<"title">>, Submission, <<"">>),
+    Type = maps:get(<<"type">>, Submission, <<"">>),
     Opts = [{capture, none}, caseless],
     case re:run(to_s(Title), "Ask\\s+HN:\\s+Who\\s+is\\s+hiring", Opts) of
         match ->
@@ -77,10 +77,9 @@ pget_jobs(UrlBase, Kids, MaxConcurrency) ->
     pmap_n({?MODULE, get_job}, [UrlBase], Kids, ChunkSize).
 
 print_jobs(Jobs) ->
-    NumberedJobs = lists:zip(lists:seq(1, length(Jobs)), Jobs),
-    [io:format("#~B: ~s\n", [N, Job]) || {N, Job} <- NumberedJobs],
+    NumberedJobs = lists:enumerate(Jobs),
+    [io:format("<h3>#~B:</h3><p>~s</p>\n", [N, Job]) || {N, Job} <- NumberedJobs],
     ok.
-
 
 make_url(Base, Resource, Id) ->
     to_s(iolist_to_binary([Base, $/, Resource, $/, to_s(Id), ".json"])).
@@ -102,12 +101,11 @@ receive_response(RequestId, Timeout) ->
     receive
         {http, {RequestId, Result}} ->
             {{_Version, 200, _ReasonPhrase}, _Headers, Body} = Result,
-            {ok, jsx:decode(Body)}
+            {ok, json:decode(Body)}
     after
         Timeout ->
             {error, timeout}
     end.
-
 
 
 num_cpus() ->
@@ -145,8 +143,8 @@ safe_rpc_pmap(FuncSpec, ExtraArgs, L) ->
         rpc:pmap(FuncSpec, ExtraArgs, L)
     catch
         _:badrpc ->
-            io:format(standard_error, "pmap failed for ExtraArgs=~p, L=~p\n",
-                      [ExtraArgs, L]),
+            io:format(standard_error, "\nWarning: pmap failed for ExtraArgs=~p, L=~s\n",
+                      [ExtraArgs, [integer_to_list(X) ++ "," || X <- lists:sublist(L, 5)] ++ (if length(L) > 5 -> ["..."]; true -> [] end)]),
             %% Drop one item from list and retry until ok or empty
             safe_rpc_pmap(FuncSpec, ExtraArgs, tl(L))
     end.
@@ -167,8 +165,8 @@ get_job(Id, UrlBase) when is_integer(Id) ->
 get_text(null) ->
     undefined;
 get_text(Kid) ->
-    case {proplists:get_value(<<"text">>, Kid),
-          proplists:get_value(<<"deleted">>, Kid)} of
+    case {maps:get(<<"text">>, Kid, undefined),
+          maps:get(<<"deleted">>, Kid, false)} of
         {_, true} ->
             undefined;
         {undefined, _} ->
