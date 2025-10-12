@@ -22,7 +22,7 @@ main(MaxConcurrency) ->
     User = get_user(?URL_BASE, ?USER_ID),
     case maps:get(<<"submitted">>, User) of
         undefined ->
-            io:format("No submissions for user ~p\n", [User]);
+            io:format(standard_error, "No submissions for user ~p\n", [User]);
         Submissions ->
             print_jobs(?URL_BASE, Submissions, MaxConcurrency)
     end.
@@ -35,8 +35,8 @@ get_user(UrlBase, UserId) ->
     Id = maps:get(<<"id">>, User),
     case Id =:= UserId of
         false ->
-            io:format("Expected user id ~p, got ~p, aborting\n", [UserId, Id]),
-            erlang:halt(1);
+            io:format(standard_error, "Expected user id ~p, got ~p, aborting\n", [UserId, Id]),
+            throw({error, {bad_user, {expected, UserId}, {got, Id}}});
         true ->
             User
     end.
@@ -99,7 +99,8 @@ pget_jobs(UrlBase, Kids, MaxConcurrency) ->
 
 print_jobs(Jobs) ->
     NumberedJobs = lists:enumerate(Jobs),
-    [io:format("<h3>#~B:</h3><p>~ts</p>\n", [N, Job]) || {N, Job} <- NumberedJobs],
+    [io:format("<h3>#~B: --------------------</h3><p>~ts</p>\n", [N, Job])
+    || {N, Job} <- NumberedJobs],
     ok.
 
 %% Construct URL.json for given base, resource and id
