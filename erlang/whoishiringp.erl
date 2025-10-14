@@ -196,7 +196,10 @@ Returns a map decoded from JSON.
 get_url_json(Base, Resource, Id) ->
     {ok, RequestId} = get_url_json_async(Base, Resource, Id),
     {ok, Response} = receive_response(RequestId, 30000),
-    Response.
+    case Response of
+        Map when is_map(Map) -> Map;
+        _Other -> #{}
+    end.
 
 -doc """
 Asynchronous http call.
@@ -243,12 +246,16 @@ num_cpus() ->
 -doc """
 Parallel map with a maximum chunk size to avoid overloading the rpc server
 """.
--spec pmap_n(FuncSpec, ExtraArgs, List, MaxChunk) -> List2 when FuncSpec ::
-{Module, Function}, Module :: module(), Function :: atom(), ExtraArgs ::
-[term()], List :: [Elem :: term()], MaxChunk :: pos_integer(), List2 ::
-[binary()]. 
-pmap_n(FuncSpec, ExtraArgs, List, MaxChunk) -> pmap_n(FuncSpec,
-ExtraArgs, List, MaxChunk, [], 0).
+-spec pmap_n(FuncSpec, ExtraArgs, List, MaxChunk) -> List2
+    when FuncSpec :: {Module, Function},
+         Module :: module(),
+         Function :: atom(),
+         ExtraArgs :: [term()],
+         List :: [Elem :: term()],
+         MaxChunk :: pos_integer(),
+         List2 :: [binary()]. 
+pmap_n(FuncSpec, ExtraArgs, List, MaxChunk) ->
+    pmap_n(FuncSpec, ExtraArgs, List, MaxChunk, [], 0).
 
 -doc """
 Accumulator version with results and count
@@ -260,9 +267,9 @@ Accumulator version with results and count
          ExtraArgs :: [term()],
          List :: [Elem :: term()],
          MaxChunk :: pos_integer(),
-         Results :: [term()],
+         Results :: [binary()],
          N :: non_neg_integer(),
-         List2 :: [term()].
+         List2 :: [binary()].
 pmap_n(_, _, [], _, Results, N) ->
     io:format(standard_error, "\r~8..0B\n", [N]),
     lists:reverse([R || R <- Results, R /= undefined]);
@@ -274,7 +281,9 @@ pmap_n(FuncSpec, ExtraArgs, List, MaxChunk, Results, N) ->
             Result = safe_rpc_pmap(FuncSpec, ExtraArgs, ToDo),
             NewN = N + length(Result),
             io:format(standard_error, "~8..0B\r", [NewN]),
-            pmap_n(FuncSpec, ExtraArgs, Rest, MaxChunk, lists:reverse(Result) ++ Results, NewN);
+            pmap_n(FuncSpec, ExtraArgs, Rest, MaxChunk, 
+                    [R || R <- lists:reverse(Result), is_binary(R)] ++ Results,
+                    NewN);
         [] ->
             pmap_n(FuncSpec, ExtraArgs, Rest, MaxChunk, Results, N)
     end.
@@ -300,16 +309,26 @@ safe_rpc_pmap(FuncSpec, ExtraArgs, L) ->
         _:badrpc ->
             io:format(standard_error,
                       "\nWarning: pmap failed for ExtraArgs=~p, L=~s\n",
-                      [ExtraArgs,
-                       [to_s(X) ++ "," || X <- lists:sublist(L, 5)]
-                       ++ if length(L) > 5 ->
-                                 ["..."];
-                             true ->
-                                 []
-                          end]),
+                      [ExtraArgs, limit_list([to_s(X) || X <- L], 5)]),
             %% Drop one item from list and retry until ok or empty
             safe_rpc_pmap(FuncSpec, ExtraArgs, tl(L))
     end.
+
+-doc """
+Limit list to N items, return string consisting of <= N comma-separated items
+followed by "..." if there were more than N items.
+""".
+-spec limit_list(L, N) -> string()
+    when 
+        L :: [term()],
+        N :: non_neg_integer().
+limit_list(L, N) ->
+    StrSublist = [to_s(X) || X <- lists:sublist(L, N)],
+    lists:concat(lists:join(",", StrSublist))
+     ++ case length(L) > N of
+            true -> "...";
+            false -> ""
+        end.
 
 -doc """
 Safe split that doesn't fail if N > length(L)
@@ -368,13 +387,12 @@ check_remote_job(Text) ->
 -doc """
 Convert binary or integer to string (list of characters)
 """.
--spec to_s(B | I | S) -> string()
-    when B :: binary(),
-         I :: integer(),
-         S :: string().
+-spec to_s(term()) -> string().
 to_s(<<B/bytes>>) ->
     binary_to_list(B);
 to_s(I) when is_integer(I) ->
     integer_to_list(I);
+to_s(A) when is_atom(A) ->
+    atom_to_list(A);
 to_s(S) when is_list(S) ->
-    S.
+    lists:concat([to_s(X) || X <- S]).
